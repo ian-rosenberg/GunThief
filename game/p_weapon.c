@@ -23,6 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "m_player.h"
 
 
+#define KNIFE_NORMAL_DAMAGE 50
+#define KNIFE_DEATHMATCH_DAMAGE 75
+#define KNIFE_KICK 250
+#define KNIFE_RANGE 1000
+
+
 static qboolean	is_quad;
 static byte		is_silenced;
 
@@ -117,6 +123,8 @@ void PlayerNoise(edict_t *who, vec3_t where, int type)
 
 qboolean Pickup_Weapon (edict_t *ent, edict_t *other)
 {
+	
+	
 	int			index;
 	gitem_t		*ammo;
 
@@ -1429,6 +1437,99 @@ void Weapon_BFG (edict_t *ent)
 
 	Weapon_Generic (ent, 8, 32, 55, 58, pause_frames, fire_frames, weapon_bfg_fire);
 }
+
+void fire_knife(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick)
+{
+	trace_t tr;             //Not entirely sure what this is, I know that it is used
+	//to trace out the route of the weapon being used...gotta limit it
+
+	vec3_t          dir;            //Another point I am unclear about
+	vec3_t          forward;        //maybe someday I will know a little bit
+	vec3_t          right;          //better about what these are
+	vec3_t          up;
+	vec3_t          end;
+
+	tr = gi.trace(self->s.origin, NULL, NULL, start, self, MASK_SHOT);
+
+	if (!(tr.fraction < 1.0))       //I can only assume this has something to do
+		//with the progress of the trace
+	{
+		vectoangles(aimdir, dir);
+		AngleVectors(dir, forward, right, up);             //possibly sets some of the angle vectors
+		//as standards?
+
+		VectorMA(start, KNIFE_RANGE, forward, end);           //This does some extension of the vector...
+		//note how short I have this attack going
+	}
+
+	//The fire_lead had an awful lot of stuff in here dealing with the effect of the shot
+	//upon water and whatnot, but a knife doesn't make you worry about that sort of stuff
+
+	if (!((tr.surface) && (tr.surface->flags & SURF_SKY)))
+	{
+		if (tr.fraction < 1.0)
+		{
+			if (tr.ent->takedamage)
+			{
+				T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, 0, 32);
+				gi.sound(self, CHAN_AUTO, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
+			}
+			else
+			{
+				if (strncmp(tr.surface->name, "sky", 3) != 0)
+				{
+					gi.WriteByte(svc_temp_entity);
+					gi.WriteByte(TE_SPARKS);
+					gi.WritePosition(tr.endpos);
+					gi.WriteDir(tr.plane.normal);
+					gi.multicast(tr.endpos, MULTICAST_PVS);
+
+					gi.sound(self, CHAN_AUTO, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
+				}
+			}
+		}
+	}
+	return;
+}
+
+void knife_attack(edict_t *ent, vec3_t g_offset, int damage)
+{
+	vec3_t  forward, right;
+	vec3_t  start;
+	vec3_t  offset;
+
+	if (is_quad)
+		damage *= 4;
+	AngleVectors(ent->client->v_angle, forward, right, NULL);
+	VectorSet(offset, 24, 8, ent->viewheight - 8);
+	VectorAdd(offset, g_offset, offset);
+	P_ProjectSource(ent->client, ent->s.origin, offset, forward, right, start);
+
+	VectorScale(forward, -2, ent->client->kick_origin);
+	ent->client->kick_angles[0] = -1;
+
+	fire_knife(ent, start, forward, damage, KNIFE_KICK);
+}
+
+void Weapon_Knife_Fire(edict_t *ent)
+{
+	int damage;
+	if (deathmatch->value)
+		damage = KNIFE_DEATHMATCH_DAMAGE;
+	else
+		damage = KNIFE_NORMAL_DAMAGE;
+	knife_attack(ent, vec3_origin, damage);
+	ent->client->ps.gunframe++;
+}
+
+void Weapon_Knife(edict_t *ent)
+{
+	static int      pause_frames[] = { 19, 32, 0 };
+	static int      fire_frames[] = { 5, 0 };
+
+	Weapon_Generic(ent, 4, 8, 52, 55, pause_frames, fire_frames, Weapon_Knife_Fire);
+}
+
 
 
 //======================================================================

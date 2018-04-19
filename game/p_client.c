@@ -502,6 +502,12 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 {
 	int		n;
 
+	if (self->client->resp.gunThief){
+		self->client->resp.gunThief = false;
+		self->client->resp.hasAll = false;
+		inflictor->client->resp.gunThief = true;
+	}
+
 	VectorClear (self->avelocity);
 
 	self->takedamage = DAMAGE_YES;
@@ -526,7 +532,7 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 		LookAtKiller (self, inflictor, attacker);
 		self->client->ps.pmove.pm_type = PM_DEAD;
 		ClientObituary (self, inflictor, attacker);
-		TossClientWeapon (self);
+		//TossClientWeapon (self);
 		if (deathmatch->value)
 			Cmd_Help_f (self);		// show scores
 
@@ -610,9 +616,12 @@ void InitClientPersistant (gclient_t *client)
 
 	memset (&client->pers, 0, sizeof(client->pers));
 
-	item = FindItem("Blaster");
+	item = FindItem("Knife");
+	client->pers.inventory[ITEM_INDEX(item)] = 1;
+	
+	/*item = FindItem("Blaster");
 	client->pers.selected_item = ITEM_INDEX(item);
-	client->pers.inventory[client->pers.selected_item] = 1;
+	client->pers.inventory[client->pers.selected_item] = 2;*/
 
 	client->pers.weapon = item;
 
@@ -981,6 +990,7 @@ void respawn (edict_t *self)
 {
 	if (deathmatch->value || coop->value)
 	{
+
 		// spectator's don't leave bodies
 		if (self->movetype != MOVETYPE_NOCLIP)
 			CopyToBodyQue (self);
@@ -1104,6 +1114,24 @@ void PutClientInServer (edict_t *ent)
 	int		i;
 	client_persistant_t	saved;
 	client_respawn_t	resp;
+	int		j;
+	qboolean flag = false;
+	edict_t	*e2;
+
+	for (j = 0, e2 = g_edicts + 1; !flag && j < maxclients->value; j++, e2++) {
+		flag = false;
+
+		if (e2->client->resp.gunThief){
+			flag = true;
+			gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
+		}
+	}
+
+	if (!flag){
+		ent->client->resp.gunThief = true;
+		gi.bprintf(PRINT_HIGH, "\nNo Gun Thief, you... are... IT!\n");
+	}
+
 
 	// find a spawn point
 	// do it before setting health back up, so farthest
@@ -1268,6 +1296,11 @@ void ClientBeginDeathmatch (edict_t *ent)
 	G_InitEdict (ent);
 
 	InitClientResp (ent->client);
+	
+	if (ent->client->resp.gunThief){
+		gi.multicast(ent->s.origin, MULTICAST_PVS);
+		gi.bprintf(PRINT_HIGH, "%s is the Gun Thief, GO GET 'EM!\n");
+	}
 
 	// locate ent at a spawn point
 	PutClientInServer (ent);
@@ -1571,11 +1604,115 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 {
 	gclient_t	*client;
 	edict_t	*other;
-	int		i, j;
+	int		i, j, index;
 	pmove_t	pm;
+	gitem_t		*item;
 
 	level.current_entity = ent;
 	client = ent->client;
+
+	/*if (client->resp.gunThief)
+		gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
+	else
+		gi.bprintf(PRINT_HIGH, "\nThere is NO Gun Thief\n");
+	if (client->resp.hasAll)
+		gi.bprintf(PRINT_HIGH, "\nSomeone's hasAll is active\n");
+	else
+		gi.bprintf(PRINT_HIGH, "\nSomeone's hasAll is NOT active\n");*/
+
+	if (client->resp.gunThief && !client->resp.hasAll){
+		gi.bprintf(PRINT_HIGH, "\nsomeone has all the weapons\n");
+		item = FindItem("Knife");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 1;
+		item = FindItem("Shotgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 2;
+		item = FindItem("Super Shotgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 3;
+		item = FindItem("Machinegun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 4;
+		item = FindItem("Chaingun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 5; 
+		item = FindItem("Grenades");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 6; 
+		item = FindItem("Grenade Launcher");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 7;
+		item = FindItem("Rocket Launcher");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 8; 
+		item = FindItem("HyperBlaster");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 9;
+		item = FindItem("Railgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 10;
+		item = FindItem("BFG10k");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 11;
+
+		item = FindItem("Bullets");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_bullets)
+				client->pers.inventory[index] = client->pers.max_bullets;
+		}
+
+		item = FindItem("Shells");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_shells)
+				client->pers.inventory[index] = client->pers.max_shells;
+		}
+
+		item = FindItem("Cells");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_cells)
+				client->pers.inventory[index] = client->pers.max_cells;
+		}
+
+		item = FindItem("Grenades");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_grenades)
+				client->pers.inventory[index] = client->pers.max_grenades;
+		}
+
+		item = FindItem("Rockets");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_rockets)
+				client->pers.inventory[index] = client->pers.max_rockets;
+		}
+
+		item = FindItem("Slugs");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_slugs)
+				client->pers.inventory[index] = client->pers.max_slugs;
+		}
+
+		client->resp.hasAll = true;
+	}
+
 
 	if (level.intermissiontime)
 	{
