@@ -26,7 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define KNIFE_NORMAL_DAMAGE 50
 #define KNIFE_DEATHMATCH_DAMAGE 75
 #define KNIFE_KICK 250
-#define KNIFE_RANGE 1000
+#define KNIFE_RANGE 50
 
 
 static qboolean	is_quad;
@@ -1440,30 +1440,13 @@ void Weapon_BFG (edict_t *ent)
 
 void fire_knife(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick)
 {
-	trace_t tr;             //Not entirely sure what this is, I know that it is used
-	//to trace out the route of the weapon being used...gotta limit it
+	trace_t tr; //detect whats in front of you up to range "vec3_t end"
 
-	vec3_t          dir;            //Another point I am unclear about
-	vec3_t          forward;        //maybe someday I will know a little bit
-	vec3_t          right;          //better about what these are
-	vec3_t          up;
-	vec3_t          end;
+	vec3_t end;
 
-	tr = gi.trace(self->s.origin, NULL, NULL, start, self, MASK_SHOT);
+	VectorMA(start, KNIFE_RANGE, aimdir, end);  //calculates the range vector                      
 
-	if (!(tr.fraction < 1.0))       //I can only assume this has something to do
-		//with the progress of the trace
-	{
-		vectoangles(aimdir, dir);
-		AngleVectors(dir, forward, right, up);             //possibly sets some of the angle vectors
-		//as standards?
-
-		VectorMA(start, KNIFE_RANGE, forward, end);           //This does some extension of the vector...
-		//note how short I have this attack going
-	}
-
-	//The fire_lead had an awful lot of stuff in here dealing with the effect of the shot
-	//upon water and whatnot, but a knife doesn't make you worry about that sort of stuff
+	tr = gi.trace(self->s.origin, NULL, NULL, end, self, MASK_SHOT);
 
 	if (!((tr.surface) && (tr.surface->flags & SURF_SKY)))
 	{
@@ -1471,21 +1454,21 @@ void fire_knife(edict_t *self, vec3_t start, vec3_t aimdir, int damage, int kick
 		{
 			if (tr.ent->takedamage)
 			{
+				
 				T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, 0, 32);
 				gi.sound(self, CHAN_AUTO, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
+
 			}
 			else
 			{
-				if (strncmp(tr.surface->name, "sky", 3) != 0)
-				{
-					gi.WriteByte(svc_temp_entity);
-					gi.WriteByte(TE_SPARKS);
-					gi.WritePosition(tr.endpos);
-					gi.WriteDir(tr.plane.normal);
-					gi.multicast(tr.endpos, MULTICAST_PVS);
+				gi.WriteByte(svc_temp_entity);
+				gi.WriteByte(TE_SPARKS);
+				gi.WritePosition(tr.endpos);
+				gi.WriteDir(tr.plane.normal);
+				gi.multicast(tr.endpos, MULTICAST_PVS);
 
-					gi.sound(self, CHAN_AUTO, gi.soundindex("misc/fhit3.wav"), 1, ATTN_NORM, 0);
-				}
+				gi.sound(self, CHAN_AUTO, gi.soundindex("weapons/grenlb1b.wav"), 1, ATTN_NORM, 0);
+
 			}
 		}
 	}

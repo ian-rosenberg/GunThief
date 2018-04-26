@@ -1124,12 +1124,14 @@ void PutClientInServer (edict_t *ent)
 		if (e2->client->resp.gunThief){
 			flag = true;
 			gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
+			e2->client->doubleJump = false;
 		}
 	}
 
 	if (!flag){
 		ent->client->resp.gunThief = true;
 		gi.bprintf(PRINT_HIGH, "\nNo Gun Thief, you... are... IT!\n");
+		ent->client->doubleJump = false;
 	}
 
 
@@ -1592,34 +1594,29 @@ void PrintPmove (pmove_t *pm)
 	Com_Printf ("sv %3i:%i %i\n", pm->cmd.impulse, c1, c2);
 }
 
-/*
-==============
-ClientThink
-
-This will be called once for each client frame, which will
-usually be a couple times for each server frame.
-==============
-*/
-void ClientThink (edict_t *ent, usercmd_t *ucmd)
-{
+void CheckDoubleJump(edict_t *ent, usercmd_t *cmd){
 	gclient_t	*client;
-	edict_t	*other;
-	int		i, j, index;
-	pmove_t	pm;
-	gitem_t		*item;
-
-	level.current_entity = ent;
 	client = ent->client;
 
-	/*if (client->resp.gunThief)
-		gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
-	else
-		gi.bprintf(PRINT_HIGH, "\nThere is NO Gun Thief\n");
-	if (client->resp.hasAll)
-		gi.bprintf(PRINT_HIGH, "\nSomeone's hasAll is active\n");
-	else
-		gi.bprintf(PRINT_HIGH, "\nSomeone's hasAll is NOT active\n");*/
+	//need to switch to !client->resp.gunThief after testing
+	if (ent->velocity[2] < 0 && client->resp.gunThief){
+		if (!client->doubleJump){
+			if (cmd->upmove > 0){
+				ent->velocity[2] += 250;
+				client->doubleJump = true;
 
+				gi.sound(ent, CHAN_VOICE, gi.soundindex("*jump1.wav"), 1, ATTN_NORM, 0);
+			}
+		}
+	}
+	else if (ent->velocity[2] == 0){
+		client->doubleJump = false;
+	}
+}
+
+void CheckGunThief(gclient_t *client, gitem_t *item){
+	int index;
+	
 	if (client->resp.gunThief && !client->resp.hasAll){
 		gi.bprintf(PRINT_HIGH, "\nsomeone has all the weapons\n");
 		item = FindItem("Knife");
@@ -1636,16 +1633,16 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 		client->pers.inventory[client->pers.selected_item] = 4;
 		item = FindItem("Chaingun");
 		client->pers.selected_item = ITEM_INDEX(item);
-		client->pers.inventory[client->pers.selected_item] = 5; 
+		client->pers.inventory[client->pers.selected_item] = 5;
 		item = FindItem("Grenades");
 		client->pers.selected_item = ITEM_INDEX(item);
-		client->pers.inventory[client->pers.selected_item] = 6; 
+		client->pers.inventory[client->pers.selected_item] = 6;
 		item = FindItem("Grenade Launcher");
 		client->pers.selected_item = ITEM_INDEX(item);
 		client->pers.inventory[client->pers.selected_item] = 7;
 		item = FindItem("Rocket Launcher");
 		client->pers.selected_item = ITEM_INDEX(item);
-		client->pers.inventory[client->pers.selected_item] = 8; 
+		client->pers.inventory[client->pers.selected_item] = 8;
 		item = FindItem("HyperBlaster");
 		client->pers.selected_item = ITEM_INDEX(item);
 		client->pers.inventory[client->pers.selected_item] = 9;
@@ -1655,7 +1652,9 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 		item = FindItem("BFG10k");
 		client->pers.selected_item = ITEM_INDEX(item);
 		client->pers.inventory[client->pers.selected_item] = 11;
-
+		item = FindItem("Blaster");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 12;
 		item = FindItem("Bullets");
 		if (item)
 		{
@@ -1712,7 +1711,30 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 
 		client->resp.hasAll = true;
 	}
+}
 
+/*
+==============
+ClientThink
+
+This will be called once for each client frame, which will
+usually be a couple times for each server frame.
+==============
+*/
+void ClientThink (edict_t *ent, usercmd_t *ucmd)
+{
+	gclient_t	*client;
+	edict_t	*other;
+	int		i, j;
+	pmove_t	pm;
+	gitem_t		*item;
+
+	level.current_entity = ent;
+	client = ent->client;
+
+	CheckDoubleJump(ent, ucmd);
+
+	CheckGunThief(client, item);
 
 	if (level.intermissiontime)
 	{
