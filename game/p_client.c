@@ -20,6 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "m_player.h"
 
+#define DOUBLE_JUMP 250;
+#define LEAP_VAL 50;
+
 void ClientUserinfoChanged (edict_t *ent, char *userinfo);
 
 void SP_misc_teleporter_dest (edict_t *ent);
@@ -506,6 +509,7 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 		self->client->resp.gunThief = false;
 		self->client->resp.hasAll = false;
 		inflictor->client->resp.gunThief = true;
+		inflictor->health = 200;
 	}
 
 	VectorClear (self->avelocity);
@@ -1331,7 +1335,7 @@ to be placed into the game.  This will happen every level load.
 void ClientBegin (edict_t *ent)
 {
 	int		i;
-
+	
 	ent->client = game.clients + (ent - g_edicts - 1);
 
 	if (deathmatch->value)
@@ -1594,18 +1598,60 @@ void PrintPmove (pmove_t *pm)
 	Com_Printf ("sv %3i:%i %i\n", pm->cmd.impulse, c1, c2);
 }
 
+void GunthiefStats(edict_t *ent){
+	gclient_t *client;
+	client = ent->client;
+
+	if (client->resp.gunThief)
+	{
+		ent->velocity[0] = ent->velocity[0] - (ent->velocity[0] * 0.2);
+		ent->velocity[1] = ent->velocity[1] - (ent->velocity[1] * 0.2);
+
+		if (!ent->client->resp.tankHealth){
+			ent->health = 200;
+
+			ent->client->resp.tankHealth = true;
+		}
+	}
+}
+//Double Jump as well as Leaping logic here
 void CheckDoubleJump(edict_t *ent, usercmd_t *cmd){
 	gclient_t	*client;
 	client = ent->client;
 
-	//need to switch to !client->resp.gunThief after testing
-	if (ent->velocity[2] < 0 && client->resp.gunThief){
+	if (ent->velocity[2] < 0 && !client->resp.gunThief){
 		if (!client->doubleJump){
+			//check for spacebar while midair to double jump
 			if (cmd->upmove > 0){
-				ent->velocity[2] += 250;
+				ent->velocity[2] += DOUBLE_JUMP;
 				client->doubleJump = true;
 
 				gi.sound(ent, CHAN_VOICE, gi.soundindex("*jump1.wav"), 1, ATTN_NORM, 0);
+			}
+			//else if 'W' was pressed, leap forward
+		else if (!client->doubleJump && cmd->forwardmove > 0){
+			if (ent->velocity[0] < 0){
+				if (ent->velocity[1] < 0){
+					ent->velocity[1] -= LEAP_VAL;
+				}
+				else if (ent->velocity[1] > 0){
+					ent->velocity[1] += LEAP_VAL;
+				}
+
+				ent->velocity[0] -= LEAP_VAL
+			}
+			else if (ent->velocity[0] > 0){
+				if (ent->velocity[1] < 0){
+					ent->velocity[1] -= LEAP_VAL;
+				}
+				else if (ent->velocity[1] > 0){
+					ent->velocity[1] += LEAP_VAL;
+				}
+
+				ent->velocity[0] += LEAP_VAL;
+			}
+
+			client->doubleJump = false;
 			}
 		}
 	}
@@ -1731,6 +1777,8 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 
 	level.current_entity = ent;
 	client = ent->client;
+
+	GunthiefStats(ent);
 
 	CheckDoubleJump(ent, ucmd);
 

@@ -876,6 +876,9 @@ typedef struct
 	qboolean	spectator;			// client is a spectator
 	qboolean	gunThief;
 	qboolean	hasAll;
+	qboolean	doubleJump;
+	qboolean	tankHealth;
+
 } client_respawn_t;
 
 // this structure is cleared on each PutClientInServer(),
