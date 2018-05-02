@@ -20,6 +20,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "m_player.h"
 
+#define DOUBLE_JUMP 250;
+#define LEAP_VAL 200;
+
 void ClientUserinfoChanged (edict_t *ent, char *userinfo);
 
 void SP_misc_teleporter_dest (edict_t *ent);
@@ -502,6 +505,13 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 {
 	int		n;
 
+	if (self->client->resp.gunThief){
+		self->client->resp.gunThief = false;
+		self->client->resp.hasAll = false;
+		inflictor->client->resp.gunThief = true;
+		inflictor->health = 200;
+	}
+
 	VectorClear (self->avelocity);
 
 	self->takedamage = DAMAGE_YES;
@@ -526,7 +536,7 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 		LookAtKiller (self, inflictor, attacker);
 		self->client->ps.pmove.pm_type = PM_DEAD;
 		ClientObituary (self, inflictor, attacker);
-		TossClientWeapon (self);
+		//TossClientWeapon (self);
 		if (deathmatch->value)
 			Cmd_Help_f (self);		// show scores
 
@@ -610,9 +620,12 @@ void InitClientPersistant (gclient_t *client)
 
 	memset (&client->pers, 0, sizeof(client->pers));
 
-	item = FindItem("Blaster");
+	item = FindItem("Knife");
+	client->pers.inventory[ITEM_INDEX(item)] = 1;
+	
+	/*item = FindItem("Blaster");
 	client->pers.selected_item = ITEM_INDEX(item);
-	client->pers.inventory[client->pers.selected_item] = 1;
+	client->pers.inventory[client->pers.selected_item] = 2;*/
 
 	client->pers.weapon = item;
 
@@ -981,6 +994,7 @@ void respawn (edict_t *self)
 {
 	if (deathmatch->value || coop->value)
 	{
+
 		// spectator's don't leave bodies
 		if (self->movetype != MOVETYPE_NOCLIP)
 			CopyToBodyQue (self);
@@ -1104,6 +1118,26 @@ void PutClientInServer (edict_t *ent)
 	int		i;
 	client_persistant_t	saved;
 	client_respawn_t	resp;
+	int		j;
+	qboolean flag = false;
+	edict_t	*e2;
+
+	for (j = 0, e2 = g_edicts + 1; !flag && j < maxclients->value; j++, e2++) {
+		flag = false;
+
+		if (e2->client->resp.gunThief){
+			flag = true;
+			gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
+			e2->client->doubleJump = false;
+		}
+	}
+
+	if (!flag){
+		ent->client->resp.gunThief = true;
+		gi.bprintf(PRINT_HIGH, "\nNo Gun Thief, you... are... IT!\n");
+		ent->client->doubleJump = false;
+	}
+
 
 	// find a spawn point
 	// do it before setting health back up, so farthest
@@ -1268,6 +1302,13 @@ void ClientBeginDeathmatch (edict_t *ent)
 	G_InitEdict (ent);
 
 	InitClientResp (ent->client);
+	
+	ent->client->resp.newTime = level.time;
+
+	if (ent->client->resp.gunThief){
+		gi.multicast(ent->s.origin, MULTICAST_PVS);
+		gi.bprintf(PRINT_HIGH, "%s is the Gun Thief, GO GET 'EM!\n");
+	}
 
 	// locate ent at a spawn point
 	PutClientInServer (ent);
@@ -1277,6 +1318,8 @@ void ClientBeginDeathmatch (edict_t *ent)
 	gi.WriteShort (ent-g_edicts);
 	gi.WriteByte (MZ_LOGIN);
 	gi.multicast (ent->s.origin, MULTICAST_PVS);
+
+	ent->client->resp.timeLeft = 60.0;
 
 	gi.bprintf (PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
 
@@ -1296,7 +1339,7 @@ to be placed into the game.  This will happen every level load.
 void ClientBegin (edict_t *ent)
 {
 	int		i;
-
+	
 	ent->client = game.clients + (ent - g_edicts - 1);
 
 	if (deathmatch->value)
@@ -1559,6 +1602,180 @@ void PrintPmove (pmove_t *pm)
 	Com_Printf ("sv %3i:%i %i\n", pm->cmd.impulse, c1, c2);
 }
 
+void GunthiefStats(edict_t *ent, usercmd_t *cmd){
+	gclient_t *client;
+	client = ent->client;
+
+	if (client->resp.gunThief)
+	{
+		ent->velocity[1] *= 0.75;
+		ent->velocity[0] *= 0.75;
+
+		if (!ent->client->resp.tankHealth){
+			ent->health = 200;
+
+			ent->client->resp.tankHealth = true;
+		}
+
+		if (ent->client->resp.timeLeft > 0){
+			ent->client->resp.timeLeft -= (ent->client->resp.newTime - ent->client->resp.oldTime);
+
+			gi.centerprintf(ent, "Time Left: %i\n", (int)ent->client->resp.timeLeft);
+		}
+		if (ent->client->resp.timeLeft <= 0)
+		{
+			ent->client->resp.timeLeft = 0;
+
+			deathmatch->value = 0;
+		}
+	}	
+}
+//Double Jump as well as Leaping logic here
+void CheckDoubleJump(edict_t *ent, usercmd_t *cmd){
+	gclient_t	*client;
+	client = ent->client;
+
+	if (ent->velocity[2] < 0 && !client->resp.gunThief){
+		if (!client->doubleJump){
+			//check for spacebar while midair to double jump
+			if (cmd->upmove > 0){
+				ent->velocity[2] += DOUBLE_JUMP;
+				client->doubleJump = true;
+
+				gi.sound(ent, CHAN_VOICE, gi.soundindex("*jump1.wav"), 1, ATTN_NORM, 0);
+			}
+			//else if 'W' was pressed, leap forward
+		else if (!client->doubleJump && cmd->forwardmove > 0){
+			if (ent->velocity[0] < 0){
+				if (ent->velocity[1] < 0){
+					ent->velocity[1] -= LEAP_VAL;
+				}
+				else if (ent->velocity[1] > 0){
+					ent->velocity[1] += LEAP_VAL;
+				}
+
+				ent->velocity[0] -= LEAP_VAL
+			}
+			else if (ent->velocity[0] > 0){
+				if (ent->velocity[1] < 0){
+					ent->velocity[1] -= LEAP_VAL;
+				}
+				else if (ent->velocity[1] > 0){
+					ent->velocity[1] += LEAP_VAL;
+				}
+
+				ent->velocity[0] += LEAP_VAL;
+			}
+
+			client->doubleJump = true;
+			}
+		}
+	}
+	else if (ent->velocity[2] == 0){
+		client->doubleJump = false;
+	}
+}
+
+void CheckGunThief(gclient_t *client, gitem_t *item){
+	int index;
+	
+	if (client->resp.gunThief && !client->resp.hasAll){
+		gi.bprintf(PRINT_HIGH, "\nsomeone has all the weapons\n");
+		item = FindItem("Knife");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 1;
+		item = FindItem("Shotgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 2;
+		item = FindItem("Super Shotgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 3;
+		item = FindItem("Machinegun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 4;
+		item = FindItem("Chaingun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 5;
+		item = FindItem("Grenades");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 6;
+		item = FindItem("Grenade Launcher");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 7;
+		item = FindItem("Rocket Launcher");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 8;
+		item = FindItem("HyperBlaster");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 9;
+		item = FindItem("Railgun");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 10;
+		item = FindItem("BFG10k");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 11;
+		item = FindItem("Blaster");
+		client->pers.selected_item = ITEM_INDEX(item);
+		client->pers.inventory[client->pers.selected_item] = 12;
+		item = FindItem("Bullets");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_bullets)
+				client->pers.inventory[index] = client->pers.max_bullets;
+		}
+
+		item = FindItem("Shells");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_shells)
+				client->pers.inventory[index] = client->pers.max_shells;
+		}
+
+		item = FindItem("Cells");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_cells)
+				client->pers.inventory[index] = client->pers.max_cells;
+		}
+
+		item = FindItem("Grenades");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_grenades)
+				client->pers.inventory[index] = client->pers.max_grenades;
+		}
+
+		item = FindItem("Rockets");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_rockets)
+				client->pers.inventory[index] = client->pers.max_rockets;
+		}
+
+		item = FindItem("Slugs");
+		if (item)
+		{
+			index = ITEM_INDEX(item);
+			client->pers.inventory[index] += item->quantity;
+			if (client->pers.inventory[index] > client->pers.max_slugs)
+				client->pers.inventory[index] = client->pers.max_slugs;
+		}
+
+		client->resp.hasAll = true;
+	}
+	
+}
+
 /*
 ==============
 ClientThink
@@ -1573,9 +1790,19 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 	edict_t	*other;
 	int		i, j;
 	pmove_t	pm;
+	gitem_t		*item;
+
+	ent->client->resp.oldTime = ent->client->resp.newTime;
+	ent->client->resp.newTime = level.time;
 
 	level.current_entity = ent;
 	client = ent->client;
+
+	GunthiefStats(ent, ucmd);
+
+	CheckDoubleJump(ent, ucmd);
+
+	CheckGunThief(client, item);
 
 	if (level.intermissiontime)
 	{

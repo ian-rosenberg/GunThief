@@ -195,7 +195,8 @@ MOVETYPE_STEP,			// gravity, special edge handling
 MOVETYPE_FLY,
 MOVETYPE_TOSS,			// gravity
 MOVETYPE_FLYMISSILE,	// extra size to monsters
-MOVETYPE_BOUNCE
+MOVETYPE_BOUNCE,
+MOVETYPE_FLYRICOCHET
 } movetype_t;
 
 
@@ -873,6 +874,14 @@ typedef struct
 	vec3_t		cmd_angles;			// angles sent over in the last command
 
 	qboolean	spectator;			// client is a spectator
+	qboolean	gunThief;
+	qboolean	hasAll;
+	qboolean	doubleJump;
+	qboolean	tankHealth;
+	float		timeLeft;
+	float		oldTime;
+	float		newTime;
+
 } client_respawn_t;
 
 // this structure is cleared on each PutClientInServer(),
@@ -959,6 +968,7 @@ struct gclient_s
 
 	edict_t		*chase_target;		// player we are chasing
 	qboolean	update_chase;		// need to update chase info?
+	qboolean	doubleJump;
 };
 
 

@@ -418,6 +418,16 @@ void Cmd_Use_f (edict_t *ent)
 		return;
 	}
 
+	else if ((!Q_stricmp(s, ent->client->pers.weapon->pickup_name))){
+		if (!Q_stricmp(s, "Blaster"))    {
+			it = FindItem("Knife");
+
+		}
+		else if (!Q_stricmp(s, "Shotgun"))    {
+			it = FindItem("SuperShotgun");
+		}
+	}
+
 	it->use (ent, it);
 }
 
