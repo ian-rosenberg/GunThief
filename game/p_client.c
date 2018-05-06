@@ -20,8 +20,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "m_player.h"
 
-#define DOUBLE_JUMP 250;
-#define LEAP_VAL 200;
+#define DOUBLE_JUMP				250;
+#define LEAP_VAL				200;
 
 void ClientUserinfoChanged (edict_t *ent, char *userinfo);
 
@@ -1319,7 +1319,10 @@ void ClientBeginDeathmatch (edict_t *ent)
 	gi.WriteByte (MZ_LOGIN);
 	gi.multicast (ent->s.origin, MULTICAST_PVS);
 
-	ent->client->resp.timeLeft = 60.0;
+	ent->client->resp.timeLeft = (int)fraglimit->value;
+	ent->client->resp.timeToUse = 0;
+	ent->client->resp.oldTimeLeft = (int)ent->client->resp.timeLeft;
+
 
 	gi.bprintf (PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
 
@@ -1602,12 +1605,44 @@ void PrintPmove (pmove_t *pm)
 	Com_Printf ("sv %3i:%i %i\n", pm->cmd.impulse, c1, c2);
 }
 
+void CheckTeleport(edict_t *ent){
+	gclient_t *client;
+	int i = 0;
+
+	client = ent->client;
+	
+	if (client->resp.gunThief){
+		if (client->resp.teleportTime <= 10){
+			client->resp.teleportTime += client->resp.deltaTime;
+			gi.centerprintf(ent, "Time til next teleport: %i\nTime Left as Gun Thief: %i\n", (abs((int)ent->client->resp.teleportTime - 10)), abs((int)ent->client->resp.timeLeft));
+		}
+		else if (client->resp.teleportTime > 10){
+			if (client->resp.posRemembered){
+				client->resp.timeToUse += client->resp.deltaTime;
+				gi.centerprintf(ent, "Time to lose stored teleport: %i\nTime Left as Gun Thief: %i\n", (abs((int)ent->client->resp.timeToUse - 10)), abs((int)ent->client->resp.timeLeft));
+			}
+		}
+	}
+	else
+	{
+		if (client->resp.teleportTime <= 10){
+			client->resp.teleportTime += client->resp.deltaTime;
+			gi.centerprintf(ent, "Time til next teleport: %i\n", (abs((int)ent->client->resp.teleportTime - 10)));
+		}
+		else if (client->resp.teleportTime > 10){
+			if (client->resp.posRemembered){
+				client->resp.timeToUse += client->resp.deltaTime;
+				gi.centerprintf(ent, "Time to lose stored teleport: %i", (abs((int)ent->client->resp.timeToUse - 10)));
+			}
+		}
+	}
+}
+
 void GunthiefStats(edict_t *ent, usercmd_t *cmd){
 	gclient_t *client;
 	client = ent->client;
 
-	if (client->resp.gunThief)
-	{
+	if (client->resp.gunThief){
 		ent->velocity[1] *= 0.75;
 		ent->velocity[0] *= 0.75;
 
@@ -1618,15 +1653,19 @@ void GunthiefStats(edict_t *ent, usercmd_t *cmd){
 		}
 
 		if (ent->client->resp.timeLeft > 0){
-			ent->client->resp.timeLeft -= (ent->client->resp.newTime - ent->client->resp.oldTime);
+			ent->client->resp.timeLeft -= ent->client->resp.deltaTime;
 
-			gi.centerprintf(ent, "Time Left: %i\n", (int)ent->client->resp.timeLeft);
+			if ((int)ent->client->resp.timeLeft == ent->client->resp.oldTimeLeft - 1 || (int)ent->client->resp.timeLeft == 60){
+				gi.centerprintf(ent, "Time Left as Gun Thief: %i\n", (int)ent->client->resp.timeLeft);
+
+				ent->client->resp.oldTimeLeft -= 1;
+				ent->client->resp.score++;
+			}
+
 		}
 		if (ent->client->resp.timeLeft <= 0)
 		{
 			ent->client->resp.timeLeft = 0;
-
-			deathmatch->value = 0;
 		}
 	}	
 }
@@ -1794,9 +1833,12 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 
 	ent->client->resp.oldTime = ent->client->resp.newTime;
 	ent->client->resp.newTime = level.time;
+	ent->client->resp.deltaTime = ent->client->resp.newTime - ent->client->resp.oldTime;
 
 	level.current_entity = ent;
 	client = ent->client;
+
+	CheckTeleport(ent);
 
 	GunthiefStats(ent, ucmd);
 
