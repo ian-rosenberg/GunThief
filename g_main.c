@@ -277,34 +277,15 @@ void CheckDMRules (void)
 	int			i;
 	gclient_t	*cl;
 
-	if (level.intermissiontime)
-		return;
-
-	if (!deathmatch->value)
-		return;
-
-	if (timelimit->value)
-	{
-		if (level.time >= timelimit->value*60)
-		{
-			gi.bprintf (PRINT_HIGH, "Timelimit hit.\n");
-			EndDMLevel ();
-			return;
-		}
-	}
-
-	if (fraglimit->value)
-	{
-		for (i=0 ; i<maxclients->value ; i++)
+	if (fraglimit->value){
+		for (i = 0; i < maxclients->value; i++)
 		{
 			cl = game.clients + i;
-			if (!g_edicts[i+1].inuse)
-				continue;
 
 			if (cl->resp.score >= fraglimit->value)
 			{
-				gi.bprintf (PRINT_HIGH, "Fraglimit hit.\n");
-				EndDMLevel ();
+				gi.bprintf(PRINT_HIGH, "Gun Thief, %s, has won!\n", cl->pers.netname);
+				EndDMLevel();
 				return;
 			}
 		}

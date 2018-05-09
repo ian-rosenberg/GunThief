@@ -806,6 +806,7 @@ void G_RunEntity (edict_t *ent);
 //
 void SaveClientData (void);
 void FetchClientEntData (edict_t *ent);
+void EndDMLevel(void);
 
 //
 // g_chase.c
@@ -874,13 +875,24 @@ typedef struct
 	vec3_t		cmd_angles;			// angles sent over in the last command
 
 	qboolean	spectator;			// client is a spectator
+
 	qboolean	gunThief;
 	qboolean	hasAll;
 	qboolean	doubleJump;
 	qboolean	tankHealth;
+
+	float		timeIncr;
 	float		timeLeft;
 	float		oldTime;
 	float		newTime;
+	float		deltaTime;
+
+	float		teleportTime;
+	float		timeToUse;
+	qboolean	canRemember;
+	qboolean	posRemembered;
+	vec3_t		teleportPos;
+	vec3_t		teleportAngles;
 
 } client_respawn_t;
 

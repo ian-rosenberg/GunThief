@@ -20,8 +20,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "m_player.h"
 
-#define DOUBLE_JUMP 250;
-#define LEAP_VAL 200;
+#define DOUBLE_JUMP				250;
+#define LEAP_VAL				200;
+
+const int teleport_val = 10;
 
 void ClientUserinfoChanged (edict_t *ent, char *userinfo);
 
@@ -307,8 +309,6 @@ void ClientObituary (edict_t *self, edict_t *inflictor, edict_t *attacker)
 		if (message)
 		{
 			gi.bprintf (PRINT_MEDIUM, "%s %s.\n", self->client->pers.netname, message);
-			if (deathmatch->value)
-				self->client->resp.score--;
 			self->enemy = NULL;
 			return;
 		}
@@ -390,21 +390,14 @@ void ClientObituary (edict_t *self, edict_t *inflictor, edict_t *attacker)
 			if (message)
 			{
 				gi.bprintf (PRINT_MEDIUM,"%s %s %s%s\n", self->client->pers.netname, message, attacker->client->pers.netname, message2);
-				if (deathmatch->value)
-				{
-					if (ff)
-						attacker->client->resp.score--;
-					else
-						attacker->client->resp.score++;
-				}
+
 				return;
 			}
 		}
 	}
 
 	gi.bprintf (PRINT_MEDIUM,"%s died.\n", self->client->pers.netname);
-	if (deathmatch->value)
-		self->client->resp.score--;
+
 }
 
 
@@ -508,8 +501,10 @@ void player_die (edict_t *self, edict_t *inflictor, edict_t *attacker, int damag
 	if (self->client->resp.gunThief){
 		self->client->resp.gunThief = false;
 		self->client->resp.hasAll = false;
-		inflictor->client->resp.gunThief = true;
-		inflictor->health = 200;
+		self->client->resp.doubleJump = true;
+		attacker->client->resp.gunThief = true;
+		attacker->client->resp.hasAll = false;
+		attacker->client->resp.doubleJump = false;
 	}
 
 	VectorClear (self->avelocity);
@@ -648,6 +643,11 @@ void InitClientResp (gclient_t *client)
 	memset (&client->resp, 0, sizeof(client->resp));
 	client->resp.enterframe = level.framenum;
 	client->resp.coop_respawn = client->pers;
+	client->resp.timeIncr = 0;
+	client->resp.gunThief = false;
+	client->resp.hasAll = false;
+	client->resp.tankHealth = false;
+	client->resp.doubleJump = true;
 }
 
 /*
@@ -1122,23 +1122,6 @@ void PutClientInServer (edict_t *ent)
 	qboolean flag = false;
 	edict_t	*e2;
 
-	for (j = 0, e2 = g_edicts + 1; !flag && j < maxclients->value; j++, e2++) {
-		flag = false;
-
-		if (e2->client->resp.gunThief){
-			flag = true;
-			gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
-			e2->client->doubleJump = false;
-		}
-	}
-
-	if (!flag){
-		ent->client->resp.gunThief = true;
-		gi.bprintf(PRINT_HIGH, "\nNo Gun Thief, you... are... IT!\n");
-		ent->client->doubleJump = false;
-	}
-
-
 	// find a spawn point
 	// do it before setting health back up, so farthest
 	// ranging doesn't count this client
@@ -1287,6 +1270,23 @@ void PutClientInServer (edict_t *ent)
 	// force the current weapon up
 	client->newweapon = client->pers.weapon;
 	ChangeWeapon (ent);
+
+	for (j = 0, e2 = g_edicts + 1; !flag && j < maxclients->value; j++, e2++) {
+		flag = false;
+
+		if (e2->client->resp.gunThief){
+			flag = true;
+			gi.bprintf(PRINT_HIGH, "\nThere is a Gun Thief\n");
+			e2->client->doubleJump = false;
+		}
+	}
+
+	if (!flag){
+		ent->client->resp.gunThief = true;
+		gi.bprintf(PRINT_HIGH, "\nNo Gun Thief, you... are... IT!\n");
+		ent->client->doubleJump = false;
+		ent->client->resp.timeLeft = fraglimit->value;
+	}
 }
 
 /*
@@ -1304,6 +1304,7 @@ void ClientBeginDeathmatch (edict_t *ent)
 	InitClientResp (ent->client);
 	
 	ent->client->resp.newTime = level.time;
+	ent->client->resp.timeLeft = (int)fraglimit->value;
 
 	if (ent->client->resp.gunThief){
 		gi.multicast(ent->s.origin, MULTICAST_PVS);
@@ -1319,7 +1320,6 @@ void ClientBeginDeathmatch (edict_t *ent)
 	gi.WriteByte (MZ_LOGIN);
 	gi.multicast (ent->s.origin, MULTICAST_PVS);
 
-	ent->client->resp.timeLeft = 60.0;
 
 	gi.bprintf (PRINT_HIGH, "%s entered the game\n", ent->client->pers.netname);
 
@@ -1339,6 +1339,9 @@ to be placed into the game.  This will happen every level load.
 void ClientBegin (edict_t *ent)
 {
 	int		i;
+
+	ent->client->resp.timeLeft = fraglimit->value;
+	ent->client->resp.timeToUse = 0;
 	
 	ent->client = game.clients + (ent - g_edicts - 1);
 
@@ -1602,12 +1605,62 @@ void PrintPmove (pmove_t *pm)
 	Com_Printf ("sv %3i:%i %i\n", pm->cmd.impulse, c1, c2);
 }
 
-void GunthiefStats(edict_t *ent, usercmd_t *cmd){
+
+//checking for teleport position stored/time left to teleport
+void CheckTeleport(edict_t *ent){
+	gclient_t *client;
+	int i = 0;
+
+	client = ent->client;
+	
+	if (client->resp.gunThief){
+		if (client->resp.teleportTime <= teleport_val){
+			client->resp.teleportTime += client->resp.deltaTime;
+			gi.centerprintf(ent, "Time til next teleport: %i\nTime Left as Gun Thief: %i\n", (abs((int)ent->client->resp.teleportTime - teleport_val)), (int)ent->client->resp.timeLeft);
+		}
+		else if (client->resp.teleportTime > teleport_val){
+			if (client->resp.timeToUse < teleport_val && client->resp.posRemembered){
+				client->resp.timeToUse += client->resp.deltaTime;
+				gi.centerprintf(ent, "\nTime to lose stored teleport: %i\nTime Left as Gun Thief: %i\n", (abs((int)ent->client->resp.timeToUse - teleport_val)), (int)ent->client->resp.timeLeft);
+			}
+			else if (!client->resp.posRemembered){
+				gi.centerprintf(ent, "\nTeleport Ready!\nTime Left as Gun Thief: %i\n", (int)ent->client->resp.timeLeft);
+			}
+			else if (client->resp.timeToUse >= teleport_val){
+				client->resp.teleportTime = 0;
+				client->resp.timeToUse = 0;
+			}
+		}
+	}
+	else
+	{
+		if (client->resp.teleportTime <= teleport_val){
+			client->resp.teleportTime += client->resp.deltaTime;
+			gi.centerprintf(ent, "\nTime til next teleport: %i\n", (abs((int)ent->client->resp.teleportTime - teleport_val)));
+		}
+		else if (client->resp.teleportTime > teleport_val){
+			if (client->resp.timeToUse < teleport_val && client->resp.posRemembered){
+				client->resp.timeToUse += client->resp.deltaTime;
+				gi.centerprintf(ent, "\nTime to lose stored teleport: %i\n", (abs((int)ent->client->resp.timeToUse - teleport_val)));
+			}
+			else if (!client->resp.posRemembered){
+				gi.centerprintf(ent, "\nTeleport Ready!\n");
+			}
+			else if (client->resp.timeToUse >= teleport_val){
+				client->resp.teleportTime = 0;
+				client->resp.timeToUse = 0;
+			}
+		}
+	}
+}
+
+//checking for speed, health, time left
+void GunthiefStats(edict_t *ent){
 	gclient_t *client;
 	client = ent->client;
 
-	if (client->resp.gunThief)
-	{
+
+	if (client->resp.gunThief){
 		ent->velocity[1] *= 0.75;
 		ent->velocity[0] *= 0.75;
 
@@ -1618,15 +1671,14 @@ void GunthiefStats(edict_t *ent, usercmd_t *cmd){
 		}
 
 		if (ent->client->resp.timeLeft > 0){
-			ent->client->resp.timeLeft -= (ent->client->resp.newTime - ent->client->resp.oldTime);
+			if (ent->client->resp.timeIncr >= 1.0){
+				--ent->client->resp.timeLeft;
 
-			gi.centerprintf(ent, "Time Left: %i\n", (int)ent->client->resp.timeLeft);
-		}
-		if (ent->client->resp.timeLeft <= 0)
-		{
-			ent->client->resp.timeLeft = 0;
+				ent->client->resp.score++;
 
-			deathmatch->value = 0;
+				ent->client->resp.timeIncr = 0;
+			}
+
 		}
 	}	
 }
@@ -1784,7 +1836,7 @@ This will be called once for each client frame, which will
 usually be a couple times for each server frame.
 ==============
 */
-void ClientThink (edict_t *ent, usercmd_t *ucmd)
+void ClientThink(edict_t *ent, usercmd_t *ucmd)
 {
 	gclient_t	*client;
 	edict_t	*other;
@@ -1792,17 +1844,24 @@ void ClientThink (edict_t *ent, usercmd_t *ucmd)
 	pmove_t	pm;
 	gitem_t		*item;
 
-	ent->client->resp.oldTime = ent->client->resp.newTime;
-	ent->client->resp.newTime = level.time;
-
+	
 	level.current_entity = ent;
 	client = ent->client;
 
-	GunthiefStats(ent, ucmd);
+	client->resp.oldTime = client->resp.newTime;
+	client->resp.newTime = level.time;
+	client->resp.deltaTime = client->resp.newTime - client->resp.oldTime;
+	client->resp.timeIncr += client->resp.deltaTime;
+
+	CheckTeleport(ent); 
+
+	GunthiefStats(ent);
 
 	CheckDoubleJump(ent, ucmd);
 
 	CheckGunThief(client, item);
+
+	
 
 	if (level.intermissiontime)
 	{
@@ -1988,6 +2047,10 @@ void ClientBeginServerFrame (edict_t *ent)
 		return;
 
 	client = ent->client;
+	
+	if (client->resp.score >= fraglimit->value){
+		EndDMLevel();
+	}
 
 	if (deathmatch->value &&
 		client->pers.spectator != client->resp.spectator &&
